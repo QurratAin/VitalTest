@@ -24,7 +24,7 @@ INSTALLED_APPS = [
     'django_filters',
     
     # Local apps
-    'devices',
+    'devices.apps.DevicesConfig',  # Using the app config class
 ]
 
 MIDDLEWARE = [
