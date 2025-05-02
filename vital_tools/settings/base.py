@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     # Third-party apps
     'rest_framework',
     'django_filters',
+    'celery',
     
     # Local apps
     'devices.apps.DevicesConfig',  # Using the app config class
@@ -99,4 +100,22 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
     ],
+}
+
+# Celery Configuration
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    'check-sync-status': {
+        'task': 'devices.tasks.check_sync_status_task',
+        'schedule': 300.0,  # Run every 5 minutes
+    },
+    'sync-all-devices': {
+        'task': 'devices.tasks.sync_all_devices_task',
+        'schedule': 3600.0,  # Run every hour
+    },
 }
