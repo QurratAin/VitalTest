@@ -21,6 +21,7 @@ INSTALLED_APPS = [
     
     # Third-party apps
     'rest_framework',
+    'rest_framework.authtoken',  # Add this for token authentication
     'django_filters',
     'celery',
     'drf_yasg',  # Swagger/OpenAPI documentation
