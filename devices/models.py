@@ -5,25 +5,24 @@ from datetime import timedelta
 
 class BloodAnalyzer(models.Model):
     class DeviceType(models.TextChoices):
-        CORE = 'core', 'VitalOne Core Analyzer'
-        MOBILE = 'mobile', 'VitalOne Mobile Unit'
-        PROTOTYPE = 'prototype', 'Prototype Device'
+        PRODUCTION = 'production', 'Production Model'
+        PROTOTYPE = 'prototype', 'Prototype'
+        RESEARCH = 'research', 'Research Unit'
     
     class Status(models.TextChoices):
         ACTIVE = 'active', 'Active'
-        CALIBRATION_NEEDED = 'calibration', 'Needs Calibration'
-        MAINTENANCE = 'maintenance', 'In Maintenance'
-        DECOMMISSIONED = 'decommissioned', 'Decommissioned'
-
+        MAINTENANCE = 'maintenance', 'Under Maintenance'
+        RETIRED = 'retired', 'Retired'
+    
     device_id = models.CharField(
-        max_length=20,
-        unique=True,
-        help_text="Unique device serial number (e.g., VA-205-0001)"
+        max_length=50,
+        unique=True,  # Ensures global uniqueness
+        help_text="Unique device identifier (e.g., VA-205-0001)"
     )
     device_type = models.CharField(
         max_length=20,
         choices=DeviceType.choices,
-        default=DeviceType.CORE
+        default=DeviceType.PRODUCTION
     )
     status = models.CharField(
         max_length=20,
@@ -31,43 +30,50 @@ class BloodAnalyzer(models.Model):
         default=Status.ACTIVE
     )
     last_calibration = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Last calibration timestamp"
+        help_text="Last calibration date and time"
     )
     next_calibration_due = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Automatically set to last_calibration + 30 days"
+        help_text="Next calibration due date",
+        editable=False  # Auto-calculated
     )
     location = models.CharField(
         max_length=100,
-        help_text="Factory floor/lab location (e.g., 'Factory QA Line 2')"
+        help_text="Current location of the device"
     )
-    manufacturing_date = models.DateField()
+    manufacturing_date = models.DateField(
+        help_text="Date when the device was manufactured"
+    )
     assigned_technician = models.ForeignKey(
         'auth.User',
-        on_delete=models.SET_NULL,
-        null=True,
+        on_delete=models.PROTECT,
         related_name='assigned_devices',
         help_text="Technician responsible for this device"
     )
-
+    data_source = models.ForeignKey(
+        'DataSource',
+        on_delete=models.PROTECT,
+        related_name='devices',
+        help_text="Source system where this device is registered",
+        null=True,  # Temporarily allow null for migration
+        blank=True
+    )
+    
     class Meta:
         indexes = [
             models.Index(fields=['device_id']),
             models.Index(fields=['status']),
             models.Index(fields=['device_type']),
+            models.Index(fields=['data_source']),
         ]
-        verbose_name = "Blood Analyzer Device"
+        verbose_name = "Blood Analyzer"
         verbose_name_plural = "Blood Analyzers"
     
     def __str__(self):
         return f"{self.device_id} ({self.get_device_type_display()})"
     
     def save(self, *args, **kwargs):
-        # Auto-set next calibration due date
-        if self.last_calibration and not self.next_calibration_due:
+        """Auto-calculate next calibration due date"""
+        if not self.next_calibration_due:
             self.next_calibration_due = self.last_calibration + timedelta(days=30)
         super().save(*args, **kwargs)
 

@@ -18,10 +18,13 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from devices.views import HomeView
+from devices.urls import router
 
 urlpatterns = [
     path('', HomeView.as_view(), name='home'),
     path('admin/', admin.site.urls),
+    path('api/', include(router.urls)),
+    path('devices/', include('devices.urls')),
 ]
 
 if settings.DEBUG:

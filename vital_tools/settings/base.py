@@ -118,4 +118,8 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'devices.tasks.sync_all_devices_task',
         'schedule': 3600.0,  # Run every hour
     },
+    'periodic-sync': {
+        'task': 'devices.tasks.periodic_sync_task',
+        'schedule': 1800.0,  # Run every 30 minutes
+    },
 }
