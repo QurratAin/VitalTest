@@ -52,4 +52,26 @@ def check_sync_status_task():
                 
         except Exception as e:
             print(f"Error checking sync status for device {device.device_id}: {str(e)}")
+            continue
+
+@shared_task
+def periodic_sync_task():
+    """
+    Celery task to perform periodic sync of all active devices.
+    This task runs every 30 minutes and syncs devices that haven't synced in the last 30 minutes.
+    """
+    factory_source = DataSource.objects.get(source_type='factory')
+    active_devices = BloodAnalyzer.objects.filter(status='active')
+    
+    for device in active_devices:
+        try:
+            status = SyncService.get_sync_status(device.device_id)
+            
+            # If device hasn't synced in the last 30 minutes, trigger a sync
+            if status['last_sync_time'] is None or \
+               (timezone.now() - status['last_sync_time']).total_seconds() > 1800:
+                sync_device_task.delay(device.device_id)
+                
+        except Exception as e:
+            print(f"Error in periodic sync for device {device.device_id}: {str(e)}")
             continue 
