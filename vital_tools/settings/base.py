@@ -110,16 +110,8 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
-    'check-sync-status': {
-        'task': 'devices.tasks.check_sync_status_task',
-        'schedule': 300.0,  # Run every 5 minutes
-    },
-    'sync-all-devices': {
-        'task': 'devices.tasks.sync_all_devices_task',
-        'schedule': 3600.0,  # Run every hour
-    },
-    'periodic-sync': {
-        'task': 'devices.tasks.periodic_sync_task',
-        'schedule': 1800.0,  # Run every 30 minutes
+    'sync-all-sources': {
+        'task': 'devices.tasks.sync_all_sources',
+        'schedule': 60.0,  # Run every minute (task will handle its own sleep)
     },
 }
