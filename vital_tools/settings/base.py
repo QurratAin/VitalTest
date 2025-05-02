@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'django_filters',
     'celery',
+    'drf_yasg',  # Swagger/OpenAPI documentation
     
     # Local apps
     'devices.apps.DevicesConfig',  # Using the app config class
@@ -100,6 +101,31 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
     ],
+}
+
+# Swagger/OpenAPI settings
+SWAGGER_SETTINGS = {
+    'SECURITY_DEFINITIONS': {
+        'Token': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+            'description': 'Token authentication using the format: Token <token>'
+        },
+        'Session': {
+            'type': 'apiKey',
+            'name': 'Cookie',
+            'in': 'header',
+            'description': 'Session authentication using Django session cookie'
+        }
+    },
+    'USE_SESSION_AUTH': True,
+    'LOGIN_URL': 'admin:login',
+    'LOGOUT_URL': 'admin:logout',
+    'DOC_EXPANSION': 'list',
+    'APIS_SORTER': 'alpha',
+    'OPERATIONS_SORTER': 'alpha',
+    'VALIDATOR_URL': None,
 }
 
 # Celery Configuration

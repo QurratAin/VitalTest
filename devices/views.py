@@ -29,7 +29,34 @@ class HomeView(TemplateView):
 
 class BloodAnalyzerViewSet(viewsets.ModelViewSet):
     """
-    API endpoint for managing blood analyzers.
+    API endpoint for managing blood analyzer devices.
+
+    list:
+    Return a list of all blood analyzers.
+
+    retrieve:
+    Return a specific blood analyzer by device_id.
+
+    create:
+    Create a new blood analyzer.
+
+    update:
+    Update an existing blood analyzer.
+
+    partial_update:
+    Partially update an existing blood analyzer.
+
+    destroy:
+    Delete a blood analyzer.
+
+    sync:
+    Trigger a sync operation for a specific device.
+
+    sync_status:
+    Get the current sync status for a device.
+
+    sync_history:
+    Get the sync history for a device.
     """
     queryset = BloodAnalyzer.objects.all()
     serializer_class = BloodAnalyzerSerializer
@@ -40,13 +67,15 @@ class BloodAnalyzerViewSet(viewsets.ModelViewSet):
     def sync(self, request, device_id=None):
         """
         Trigger a sync operation for a specific device.
+
+        This endpoint starts a background task to synchronize data for the specified device.
+        Returns a task ID that can be used to track the sync progress.
         """
         serializer = SyncRequestSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Start sync in background
             task = sync_device_task.delay(device_id)
             return Response({
                 'message': 'Sync started',
@@ -62,6 +91,12 @@ class BloodAnalyzerViewSet(viewsets.ModelViewSet):
     def sync_status(self, request, device_id=None):
         """
         Get the current sync status for a device.
+
+        Returns the latest sync status including:
+        - Last sync time
+        - Sync status (success/failed/in_progress)
+        - Number of records processed
+        - Any error messages
         """
         try:
             status = SyncService.get_sync_status(device_id)
@@ -77,6 +112,9 @@ class BloodAnalyzerViewSet(viewsets.ModelViewSet):
     def sync_history(self, request, device_id=None):
         """
         Get the sync history for a device.
+
+        Returns a list of all sync operations performed for the device,
+        including timestamps, status, and number of records processed.
         """
         try:
             history = SyncService.get_sync_history(device_id)
@@ -91,6 +129,15 @@ class BloodAnalyzerViewSet(viewsets.ModelViewSet):
 class SyncLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API endpoint for viewing sync logs.
+
+    list:
+    Return a list of all sync logs, with optional filtering by:
+    - device_id: Filter logs for a specific device
+    - status: Filter by sync status (success/failed/in_progress)
+    - timestamp: Sort by timestamp (use ordering=-timestamp for descending)
+
+    retrieve:
+    Return a specific sync log by ID.
     """
     queryset = SyncLog.objects.all()
     serializer_class = SyncLogSerializer
@@ -114,6 +161,31 @@ class SyncLogViewSet(viewsets.ReadOnlyModelViewSet):
 class TestRunViewSet(viewsets.ModelViewSet):
     """
     API endpoint for managing test runs.
+
+    list:
+    Return a list of all test runs, with optional filtering by:
+    - device_id: Filter runs for a specific device
+    - run_type: Filter by run type (qc/production/maintenance)
+    - is_abnormal: Filter by abnormal status
+    - timestamp: Sort by timestamp
+
+    retrieve:
+    Return a specific test run by ID.
+
+    create:
+    Create a new test run.
+
+    update:
+    Update an existing test run.
+
+    partial_update:
+    Partially update an existing test run.
+
+    destroy:
+    Delete a test run.
+
+    metrics:
+    Get all metrics for a specific test run.
     """
     queryset = TestRun.objects.all()
     serializer_class = TestRunSerializer
@@ -132,7 +204,10 @@ class TestRunViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def metrics(self, request, pk=None):
         """
-        Get all metrics for a test run.
+        Get all metrics for a specific test run.
+
+        Returns a list of all metrics associated with the test run,
+        including values, expected ranges, and out-of-range status.
         """
         test_run = self.get_object()
         metrics = test_run.metrics.all()
