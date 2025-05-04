@@ -1,138 +1,223 @@
-# VitalApp
+# VitalApp - Blood Analyzer Data Management System
 
-VitalApp is a Django-based application designed to manage blood analyzer devices, test runs, and metrics across multiple data sources (factory, cloud, and legacy). It provides a robust API for device management, test data synchronization, and detailed logging.
+A Django-based system for managing blood analyzer data across multiple factory databases with synchronization capabilities.
 
-## Features
+## System Architecture
 
-- **Device Management**: Create, read, update, and delete blood analyzer devices with unique device IDs, types, statuses, locations, manufacturing dates, calibration details, and assigned technicians.
-- **Data Sources**: Support for multiple data sources (factory, cloud, legacy) with clear relationships to devices and test runs.
-- **Test Runs & Metrics**: Each device can have multiple test runs, each with detailed metrics (e.g., hemoglobin, WBC, etc.).
-- **Sync Process**: Background synchronization of data from different sources, with comprehensive logging and status/history tracking.
-- **API Security**: Secure API endpoints with session and token-based authentication.
-- **Test Data Management**: Commands to clear and repopulate test data, ensuring no duplicate entries.
-- **Extensibility**: Modular code structure for easy addition of new source types or device types.
-- **API Documentation**: Interactive API documentation using Swagger/OpenAPI.
+The system consists of:
+1. A central default database
+2. Multiple factory databases (factory_a, factory_c)
+3. A synchronization service that moves data from factory databases to the central database
+4. A test data generation service that simulates factory data
 
-## Setup
+### Database Structure
 
-### Prerequisites
+- **Default Database**: Central database that stores synchronized data from all factories
+- **Factory Databases**: Individual databases for each factory (factory_a, factory_c)
+- **Data Flow**: Factory data → Sync Service → Default Database
 
-- Python 3.8 or higher
-- Django 3.2 or higher
-- Django REST Framework
-- Celery
-- Redis (for Celery broker and result backend)
-- drf-yasg (for API documentation)
+## Directory Structure
 
-### Installation
+```
+VitalApp/
+├── devices/                      # Main application directory
+│   ├── management/              # Management commands
+│   │   └── commands/           # Custom Django commands
+│   │       ├── clear_test_data.py      # Clears all test data from databases
+│   │       ├── generate_test_data.py   # Generates test data for factories
+│   │       ├── init_factory_dbs.py     # Initializes factory databases
+│   │       └── ... (other commands)
+│   ├── migrations/              # Database migrations
+│   ├── services/               # Business logic services
+│   │   ├── analyzer.py        # Analyzer-related operations
+│   │   ├── sync.py            # Synchronization service
+│   │   ├── sync_log.py        # Sync log management
+│   │   ├── test_metric.py     # Test metric operations
+│   │   └── test_run.py        # Test run operations
+│   ├── models.py              # Database models
+│   ├── views.py               # API views
+│   ├── serializers.py         # API serializers
+│   ├── urls.py               # URL routing
+│   └── admin.py              # Django admin configuration
+├── db.sqlite3                # Default database
+├── factory_a.sqlite3         # Factory A database
+├── factory_c.sqlite3         # Factory C database
+└── requirements.txt          # Python dependencies
+```
 
-1. Clone the repository:
+## Key Components
+
+### Models
+
+1. **BloodAnalyzer**
+   - Represents a blood analyzer device
+   - Fields: device_id, device_type, status, location, etc.
+
+2. **TestRun**
+   - Represents a test run performed by an analyzer
+   - Fields: run_id, device, executed_by, timestamp, etc.
+
+3. **TestMetric**
+   - Represents individual metrics from a test run
+   - Fields: test_run, metric_type, value, expected_min, expected_max
+
+4. **DataSource**
+   - Represents a data source (factory or central)
+   - Fields: name, source_type, last_sync, is_active
+
+5. **SyncLog**
+   - Tracks synchronization operations
+   - Fields: source, timestamp, status, records_processed, error_message
+
+### Services
+
+1. **Sync Service** (`sync.py`)
+   - Handles data synchronization from factories to central database
+   - Features:
+     - Incremental sync (only new/updated records)
+     - Error handling and logging
+     - Transaction management
+
+2. **Test Data Generation** (`generate_test_data.py`)
+   - Simulates factory data generation
+   - Features:
+     - Configurable generation interval
+     - Realistic test data
+     - Multiple metric types
+
+3. **Test Run Service** (`test_run.py`)
+   - Manages test run operations
+   - Features:
+     - Run creation and validation
+     - Metric management
+     - Data integrity checks
+
+## Setup and Installation
+
+1. **Prerequisites**
    ```bash
-   git clone <repository-url>
-   cd VitalApp
-   ```
-
-2. Create a virtual environment and activate it:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. Install dependencies:
-   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
 
-4. Set up the database:
+2. **Initialize Databases**
    ```bash
    python manage.py migrate
+   python manage.py init_factory_dbs
    ```
 
-5. Start the development server:
+3. **Generate Test Data**
+   ```bash
+   python manage.py generate_test_data
+   ```
+
+4. **Start Development Server**
    ```bash
    python manage.py runserver
    ```
 
-6. Start Celery worker:
+## Running the System
+
+1. **Start Test Data Generation**
    ```bash
-   celery -A vital_tools worker -l info
+   python manage.py generate_test_data --interval 180  # Generate data every 3 minutes
    ```
 
-7. Start Celery beat (for scheduled tasks):
+2. **Start Synchronization**
    ```bash
-   celery -A vital_tools beat -l info
+   python manage.py sync_all_sources  # Run sync manually
+   # Or use the API endpoint: POST /api/sync/
    ```
 
-## Usage
+3. **Clear Test Data**
+   ```bash
+   python manage.py clear_test_data
+   ```
 
-### API Documentation
+## API Endpoints
 
-The API documentation is available at:
-- Swagger UI: `/api/docs/`
-- ReDoc: `/api/redoc/`
+- `GET /api/analyzers/` - List all analyzers
+- `GET /api/test-runs/` - List all test runs
+- `GET /api/sync-logs/` - View sync history
+- `POST /api/sync/` - Trigger manual sync
 
-These interactive documentation pages allow you to:
-- Browse all available API endpoints
-- View detailed request/response schemas
-- Test API calls directly from the browser
-- View authentication requirements
+## Monitoring and Maintenance
 
-### API Endpoints
+1. **Check Sync Status**
+   ```bash
+   python manage.py check_sync_status
+   ```
 
-- **Devices**: `/api/devices/`
-  - List all devices: `GET /api/devices/`
-  - Create new device: `POST /api/devices/`
-  - Get device details: `GET /api/devices/{device_id}/`
-  - Update device: `PUT /api/devices/{device_id}/`
-  - Delete device: `DELETE /api/devices/{device_id}/`
-  - Sync device: `POST /api/devices/{device_id}/sync/`
-  - Get sync status: `GET /api/devices/{device_id}/sync_status/`
-  - Get sync history: `GET /api/devices/{device_id}/sync_history/`
+2. **View Sync Logs**
+   - Access `/admin/devices/synclog/` in Django admin
+   - Or use API endpoint: `GET /api/sync-logs/`
 
-- **Sync Logs**: `/api/sync-logs/`
-  - List all sync logs: `GET /api/sync-logs/`
-  - Filter by device: `GET /api/sync-logs/?device_id={device_id}`
-  - Filter by status: `GET /api/sync-logs/?status={status}`
-  - Sort by timestamp: `GET /api/sync-logs/?ordering=-timestamp`
+3. **Database Maintenance**
+   - Regular backups of all databases
+   - Monitor sync log for errors
+   - Check data consistency across databases
 
-- **Test Runs**: `/api/test-runs/`
-  - List all test runs: `GET /api/test-runs/`
-  - Create new test run: `POST /api/test-runs/`
-  - Get test run details: `GET /api/test-runs/{id}/`
-  - Get test run metrics: `GET /api/test-runs/{id}/metrics/`
-  - Filter by device: `GET /api/test-runs/?device_id={device_id}`
-  - Filter by run type: `GET /api/test-runs/?run_type={run_type}`
+## Troubleshooting
 
-### Authentication
+1. **Sync Issues**
+   - Check sync logs for error messages
+   - Verify database connections
+   - Ensure proper permissions
 
-The API uses Django REST Framework's session and token authentication. Ensure you are logged in or provide a valid token in the `Authorization` header.
+2. **Data Generation Issues**
+   - Verify factory database structure
+   - Check for sufficient disk space
+   - Monitor system resources
 
-To obtain a token:
-1. Login via the admin interface or browsable API
-2. Or use the token endpoint: `POST /api-token-auth/` with username and password
+3. **API Issues**
+   - Check server logs
+   - Verify API endpoints
+   - Test database connectivity
 
-### Test Data
+## Best Practices
 
-To clear and repopulate test data, use the following commands:
-```bash
-python manage.py clear_test_data
-python manage.py populate_test_data
-```
+1. **Data Management**
+   - Regular backups
+   - Monitor sync performance
+   - Validate data integrity
 
-## Testing
+2. **System Maintenance**
+   - Regular updates
+   - Monitor system resources
+   - Check for errors in logs
 
-Run the tests using:
-```bash
-python manage.py test devices.tests
-```
+3. **Development**
+   - Follow Django best practices
+   - Write unit tests
+   - Document changes
 
-## Contributing
+## Database Schema
 
-1. Fork the repository
-2. Create a new branch
-3. Make your changes
-4. Submit a pull request
+The system uses multiple databases to manage different aspects of the application:
 
-## License
+1. **Default Database**: Central database for managing data sources and sync logs
+2. **Factory A Database**: Contains test runs and metrics for Factory A
+3. **Factory C Database**: Contains test runs and metrics for Factory C
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Schema Diagrams
+
+Below are the schema diagrams for each database, showing the main application tables and their relationships:
+
+#### Default Database Schema
+![Default Database Schema](docs/schema/schema_default.png)
+
+#### Factory A Database Schema
+![Factory A Database Schema](docs/schema/schema_factory_a.png)
+
+#### Factory C Database Schema
+![Factory C Database Schema](docs/schema/schema_factory_c.png)
+
+### Key Tables
+
+- **BloodAnalyzer**: Stores information about blood analyzers
+- **TestRun**: Records test runs performed by analyzers
+- **TestMetric**: Contains metrics and measurements from test runs
+- **DataSource**: Manages data sources for different factories
+- **SyncLog**: Tracks synchronization operations between databases
+
