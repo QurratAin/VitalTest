@@ -83,27 +83,36 @@ def sync_all_sources():
     Single task that checks all active data sources for new data.
     If no new data is found, sleeps for 10 minutes before checking again.
     """
+    print("Starting sync_all_sources task...")
     active_sources = DataSource.objects.filter(is_active=True)
+    print(f"Found {active_sources.count()} active sources")
     new_data_found = False
     
     for source in active_sources:
         try:
+            print(f"Processing source: {source.name}")
             # Check if source needs syncing
             status = SyncService.get_sync_status(source.id)
+            print(f"Source {source.name} status: {status}")
             
             # If source hasn't synced in the last hour or never synced
             if status['last_sync_time'] is None or \
                (timezone.now() - status['last_sync_time']).total_seconds() > 3600:
                 
+                print(f"Source {source.name} needs syncing")
                 # Try to sync the source
                 try:
-                    sync_result = SyncService.sync_source(source.id)
+                    sync_result = SyncService.sync_source(source)
                     if sync_result.records_processed > 0:
                         new_data_found = True
                         print(f"Synced {sync_result.records_processed} records from {source.name}")
+                    else:
+                        print(f"No records processed for {source.name}")
                 except Exception as e:
                     print(f"Error syncing source {source.name}: {str(e)}")
                     continue
+            else:
+                print(f"Source {source.name} doesn't need syncing yet")
                     
         except Exception as e:
             print(f"Error checking sync status for source {source.name}: {str(e)}")
@@ -115,4 +124,5 @@ def sync_all_sources():
         time.sleep(600)  # Sleep for 10 minutes
     
     # Schedule next check
+    print("Scheduling next sync check...")
     sync_all_sources.delay() 

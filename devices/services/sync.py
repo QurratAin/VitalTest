@@ -2,159 +2,225 @@ import time
 from datetime import timedelta
 from django.utils import timezone
 from django.db import transaction
+from django.contrib.auth.models import User
 from ..models import (
     BloodAnalyzer, SyncLog, DataSource,
     TestRun, TestMetric
 )
 import random
+from devices.services.analyzer import AnalyzerService
+from devices.services.test_run import TestRunService
+from devices.services.test_metric import TestMetricService
+from devices.services.sync_log import SyncLogService
+from celery import shared_task
 
 class SyncService:
     """Service for handling device synchronization."""
     
     @staticmethod
-    def sync_source(source_id):
+    def sync_source(source_name: str):
         """
-        Synchronize all devices from a specific data source.
-        
-        Args:
-            source_id (int): The ID of the data source to sync
-            
-        Returns:
-            SyncLog: The record of the sync operation
+        Sync data from a source database to the default database.
         """
         try:
-            source = DataSource.objects.get(id=source_id)
+            # Map source name to database name
+            db_name = source_name.lower().replace(' ', '_')
+            print(f"Starting sync from {db_name} to default database")
             
-            # Check if source is active
-            if not source.is_active:
-                error_msg = f"Data source {source.name} is not active"
-                SyncLog.objects.create(
-                    source=source,
-                    status='failed',
-                    error_message=error_msg
+            # Get the source object for this sync
+            try:
+                source = DataSource.objects.using('default').get(name=source_name)
+            except DataSource.DoesNotExist:
+                print(f"Creating {source_name} data source in default database")
+                source = DataSource.objects.using('default').create(
+                    name=source_name,
+                    source_type='factory',
+                    is_active=True
                 )
-                raise ValueError(error_msg)
             
-            # Check if source is already syncing
-            if SyncLog.objects.filter(
+            # Create sync log
+            sync_log = SyncLog.objects.using('default').create(
                 source=source,
                 status='in_progress',
-                timestamp__gte=timezone.now() - timedelta(minutes=5)
-            ).exists():
-                error_msg = f"Source {source.name} is already being synced"
-                SyncLog.objects.create(
-                    source=source,
-                    status='failed',
-                    error_message=error_msg
-                )
-                raise Exception(error_msg)
+                records_processed=0
+            )
             
-            start_time = timezone.now()
             records_processed = 0
             
             try:
-                # Get all devices for this source
-                devices = BloodAnalyzer.objects.filter(data_source=source)
+                # Get all analyzers from the source database
+                analyzers = BloodAnalyzer.objects.using(db_name).all()
+                print(f"Found {analyzers.count()} analyzers in {db_name}")
                 
-                for device in devices:
-                    # Simulate fetching new test runs from source
-                    # In a real implementation, this would connect to the source's database
-                    # and fetch actual new/updated records
-                    
-                    # For factory sources, simulate more frequent test runs
-                    if source.source_type == 'factory':
-                        num_runs = random.randint(1, 3)  # 1-3 new runs
-                        run_prefix = 'F'  # Factory prefix
-                    # For cloud sources, simulate fewer but more detailed runs
-                    elif source.source_type == 'cloud':
-                        num_runs = random.randint(0, 1)  # 0-1 new runs
-                        run_prefix = 'C'  # Cloud prefix
-                    # For legacy sources, simulate occasional runs
-                    else:
-                        num_runs = random.randint(0, 1)  # 0-1 new runs
-                        run_prefix = 'L'  # Legacy prefix
-                    
-                    new_runs = [
-                        {
-                            'run_id': f'TR-{run_prefix}-{timezone.now().strftime("%Y%m%d")}-{i:03d}',
-                            'run_type': random.choice(['qc', 'production', 'maintenance']),  # Using string values
-                            'is_abnormal': random.random() < 0.1,  # 10% chance of abnormal
-                            'is_factory_data': (source.source_type == 'factory'),  # Using string value
-                            'executed_by': device.assigned_technician,
-                            'notes': f'Test run {i} for {device.device_id}'
-                        }
-                        for i in range(1, num_runs + 1)
-                    ]
-                    
-                    with transaction.atomic():
-                        for run_data in new_runs:
-                            # Create test run
-                            test_run = TestRun.objects.create(
-                                run_id=run_data['run_id'],
-                                device=device,
-                                run_type=run_data['run_type'],
-                                is_abnormal=run_data['is_abnormal'],
-                                is_factory_data=run_data['is_factory_data'],
-                                data_source=source,
-                                executed_by=run_data['executed_by'],
-                                notes=run_data['notes']
-                            )
+                # Sync each analyzer
+                for analyzer in analyzers:
+                    try:
+                        # Check if analyzer exists in default database
+                        try:
+                            default_analyzer = BloodAnalyzer.objects.using('default').get(device_id=analyzer.device_id)
+                            print(f"Analyzer {analyzer.device_id} already exists in default database, updating...")
                             
-                            # Create metrics for the test run
-                            metric_types = [t[0] for t in TestMetric.MetricType.choices]
-                            for metric_type in metric_types:
-                                # Define expected ranges for each metric type
-                                ranges = {
-                                    'hgb': (12.0, 18.0),  # Hemoglobin
-                                    'wbc': (4.0, 11.0),   # White Blood Cells
-                                    'plt': (150.0, 450.0), # Platelets
-                                    'glc': (70.0, 140.0)  # Glucose
-                                }
-                                expected_min, expected_max = ranges[metric_type]
-                                
-                                # For abnormal runs, generate values outside normal range
-                                if run_data['is_abnormal']:
-                                    if random.random() < 0.5:  # 50% chance of high value
-                                        value = expected_max * random.uniform(1.1, 1.5)
-                                    else:  # 50% chance of low value
-                                        value = expected_min * random.uniform(0.5, 0.9)
-                                else:
-                                    value = random.uniform(expected_min * 0.9, expected_max * 1.1)
-                                
-                                TestMetric.objects.create(
-                                    test_run=test_run,
-                                    metric_type=metric_type,
-                                    value=value,
-                                    expected_min=expected_min,
-                                    expected_max=expected_max
-                                )
+                            # Update existing analyzer
+                            for field in ['device_type', 'status', 'location', 'manufacturing_date', 
+                                        'last_calibration', 'next_calibration_due']:
+                                setattr(default_analyzer, field, getattr(analyzer, field))
                             
-                            records_processed += 1
+                            # Handle assigned_technician
+                            if analyzer.assigned_technician_id:
+                                try:
+                                    # Get the technician from source database
+                                    source_technician = User.objects.using(db_name).get(id=analyzer.assigned_technician_id)
+                                    
+                                    # Try to get the technician from default database
+                                    try:
+                                        default_technician = User.objects.using('default').get(username=source_technician.username)
+                                    except User.DoesNotExist:
+                                        print(f"Creating technician {source_technician.username} in default database")
+                                        # Create the technician in default database
+                                        default_technician = User.objects.using('default').create(
+                                            username=source_technician.username,
+                                            email=source_technician.email,
+                                            first_name=source_technician.first_name,
+                                            last_name=source_technician.last_name,
+                                            is_staff=source_technician.is_staff,
+                                            is_active=source_technician.is_active
+                                        )
+                                    
+                                    default_analyzer.assigned_technician = default_technician
+                                except User.DoesNotExist:
+                                    print(f"Warning: Technician with ID {analyzer.assigned_technician_id} not found in {db_name}")
+                                    default_analyzer.assigned_technician = None
+                            
+                            # Set data source to source (not default)
+                            default_analyzer.data_source = source
+                            
+                            default_analyzer.save(using='default')
+                            
+                        except BloodAnalyzer.DoesNotExist:
+                            print(f"Creating analyzer {analyzer.device_id} in default database")
+                            
+                            # Handle assigned_technician
+                            default_technician = None
+                            if analyzer.assigned_technician_id:
+                                try:
+                                    # Get the technician from source database
+                                    source_technician = User.objects.using(db_name).get(id=analyzer.assigned_technician_id)
+                                    
+                                    # Try to get the technician from default database
+                                    try:
+                                        default_technician = User.objects.using('default').get(username=source_technician.username)
+                                    except User.DoesNotExist:
+                                        print(f"Creating technician {source_technician.username} in default database")
+                                        # Create the technician in default database
+                                        default_technician = User.objects.using('default').create(
+                                            username=source_technician.username,
+                                            email=source_technician.email,
+                                            first_name=source_technician.first_name,
+                                            last_name=source_technician.last_name,
+                                            is_staff=source_technician.is_staff,
+                                            is_active=source_technician.is_active
+                                        )
+                                except User.DoesNotExist:
+                                    print(f"Warning: Technician with ID {analyzer.assigned_technician_id} not found in {db_name}")
+                            
+                            # Create analyzer in default database
+                            analyzer_data = {
+                                'device_id': analyzer.device_id,
+                                'device_type': analyzer.device_type,
+                                'status': analyzer.status,
+                                'location': analyzer.location,
+                                'manufacturing_date': analyzer.manufacturing_date,
+                                'last_calibration': analyzer.last_calibration,
+                                'next_calibration_due': analyzer.next_calibration_due,
+                                'assigned_technician': default_technician,
+                                'data_source': source  # Use the source, not default
+                            }
+                            default_analyzer = BloodAnalyzer.objects.using('default').create(**analyzer_data)
+                        
+                        # Sync runs for this analyzer
+                        runs = TestRun.objects.using(db_name).filter(device=analyzer)
+                        print(f"Found {runs.count()} runs for analyzer {analyzer.device_id}")
+                        
+                        # Sync runs and get count of new metrics
+                        new_runs_count, new_metrics_count = TestRunService.sync_analyzer_runs(analyzer, runs)
+                        records_processed += new_metrics_count  # Only count new metrics
+                        
+                    except Exception as e:
+                        print(f"Error syncing analyzer {analyzer.device_id}: {str(e)}")
+                        continue
                 
-                # Create sync log record
-                sync_log = SyncLog.objects.create(
-                    source=source,
-                    status='success',
-                    records_processed=records_processed
-                )
+                # Update sync log with success
+                sync_log.status = 'success'
+                sync_log.records_processed = records_processed
+                sync_log.save(using='default')
                 
-                # Update data source last sync time
+                # Update last_sync in DataSource
                 source.last_sync = timezone.now()
-                source.save()
+                source.save(using='default')
                 
-                return sync_log
+                print(f"Sync completed successfully. Processed {records_processed} records.")
+                return True
                 
             except Exception as e:
-                # Create sync log record for failure
-                sync_log = SyncLog.objects.create(
-                    source=source,
-                    status='failed',
-                    error_message=str(e)
-                )
-                raise
+                print(f"Error during sync: {str(e)}")
+                # Update sync log with error
+                sync_log.status = 'failed'
+                sync_log.records_processed = records_processed
+                sync_log.error_message = str(e)
+                sync_log.save(using='default')
+                return False
                 
-        except DataSource.DoesNotExist:
-            raise Exception(f"Data source with ID {source_id} not found")
+        except Exception as e:
+            print(f"Error creating sync log: {str(e)}")
+            return False
+
+    @staticmethod
+    def sync_all_sources() -> list[SyncLog]:
+        """
+        Sync data from all sources.
+        """
+        sources = DataSource.objects.filter(is_active=True)
+        logs = []
+        
+        for source in sources:
+            try:
+                log = SyncService.sync_source(source.name)
+                logs.append(log)
+            except Exception as e:
+                print(f"Error syncing source {source.name}: {str(e)}")
+                continue
+            
+        return logs
+
+@shared_task
+def periodic_sync():
+    """
+    Celery task to periodically sync all sources.
+    """
+    while True:
+        try:
+            # Get all active data sources
+            active_sources = DataSource.objects.filter(is_active=True)
+            
+            for source in active_sources:
+                try:
+                    # Check if source needs syncing
+                    last_sync = SyncLog.objects.filter(
+                        source=source,
+                        status='completed'
+                    ).order_by('-timestamp').first()
+                    
+                    # If never synced or last sync was more than 2 minutes ago
+                    if not last_sync or (timezone.now() - last_sync.timestamp).total_seconds() > 120:
+                        SyncService.sync_source(source.name)
+                except Exception as e:
+                    print(f"Error syncing source {source.name}: {str(e)}")
+                    continue
+                    
+            time.sleep(60)  # Sleep for 1 minute
+        except Exception as e:
+            print(f"Error in periodic sync: {str(e)}")
+            time.sleep(30)  # Sleep for 30 seconds on error
     
     @staticmethod
     def get_sync_status(source_id):
