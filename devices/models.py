@@ -54,7 +54,7 @@ class BloodAnalyzer(models.Model):
         on_delete=models.PROTECT,
         related_name='devices',
         help_text="Source system where this device is registered",
-        null=True,  # Temporarily allow null for migration
+        null=True,
         blank=True
     )
     
@@ -113,7 +113,9 @@ class TestRun(models.Model):
     data_source = models.ForeignKey(
         'DataSource',
         on_delete=models.PROTECT,
-        related_name='test_runs'
+        related_name='test_runs',
+        null=True,
+        blank=True
     )
     executed_by = models.ForeignKey(
         'auth.User',
@@ -138,6 +140,65 @@ class TestRun(models.Model):
     
     def __str__(self):
         return f"{self.run_id} ({self.device.device_id})"
+
+class FactoryBloodAnalyzer(models.Model):
+    class DeviceType(models.TextChoices):
+        PRODUCTION = 'production', 'Production Model'
+        PROTOTYPE = 'prototype', 'Prototype'
+        RESEARCH = 'research', 'Research Unit'
+    
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        MAINTENANCE = 'maintenance', 'Under Maintenance'
+        RETIRED = 'retired', 'Retired'
+    
+    device_id = models.CharField(
+        max_length=50,
+        unique=True,  # Ensures global uniqueness
+        help_text="Unique device identifier (e.g., VA-205-0001)"
+    )
+    device_type = models.CharField(
+        max_length=20,
+        choices=DeviceType.choices,
+        default=DeviceType.PRODUCTION
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE
+    )
+    last_calibration = models.DateTimeField(
+        help_text="Last calibration date and time"
+    )
+    next_calibration_due = models.DateTimeField(
+        help_text="Next calibration due date",
+        editable=False  # Auto-calculated
+    )
+    location = models.CharField(
+        max_length=100,
+        help_text="Current location of the device"
+    )
+    manufacturing_date = models.DateField(
+        help_text="Date when the device was manufactured"
+    )
+    assigned_technician = models.ForeignKey(
+        'auth.User',
+        on_delete=models.PROTECT,
+        related_name='assigned_devices',
+        help_text="Technician responsible for this device"
+    )
+    
+    class Meta:
+        abstract = True
+    
+    def __str__(self):
+        return f"{self.device_id} ({self.get_device_type_display()})"
+    
+    def save(self, *args, **kwargs):
+        """Auto-calculate next calibration due date"""
+        if not self.next_calibration_due:
+            self.next_calibration_due = self.last_calibration + timedelta(days=30)
+        super().save(*args, **kwargs)
 
 class TestMetric(models.Model):
     class MetricType(models.TextChoices):
